@@ -1,1 +1,1 @@
-# iDIGs2
+# BioMatch
