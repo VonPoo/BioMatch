@@ -2,29 +2,34 @@
 
 BioMatch is a data‑driven workflow for sample identity matching. It covers k‑mer panel generation, k‑mer counting for FASTA/FASTQ, and evaluation on VCF/PLINK with integrated statistical summaries.
 
-```
-=============================================================================
- BioMatch — A data-driven framework for comprehensive sample identification
-=============================================================================
+<!-- Badges: conda downloads/version, environment -->
+[![Conda Version](https://img.shields.io/conda/vn/VonPoo/biomatch?label=biomatch%20conda)](https://anaconda.org/bioconda/biomatch)
+[![Conda Version](https://img.shields.io/conda/vn/VonPoo/r-deepkin?label=r-deepkin%20conda)](https://anaconda.org/VonPoo/r-deepkin)
+[![Conda Downloads (total)](https://img.shields.io/conda/dn/bioconda/biomatch?label=biomatch%20downloads)](https://anaconda.org/bioconda/biomatch)
+[![Conda Downloads (total)](https://img.shields.io/conda/dn/VonPoo/biomatch?label=r-deepkin%20downloads)](https://anaconda.org/vonpoo/r-deepkin)
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![R](https://img.shields.io/badge/R-4.3.2-blueviolet)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-    ██████╗  ██╗ ██████╗  ███╗   ███╗  █████╗ ████████╗ ███████╗ ██╗  ██╗
-    ██╔══██╗ ██║ ██╔══██╗ ████╗ ████║ ██╔══██╗╚═ ██╔══╝ ██╔════╝ ██║  ██║
-    ██████╔╝ ██║ ██║  ██║ ██╔████╔██║ ███████║   ██║    ██║      ███████║
-    ██╔══██╗ ██║ ██║  ██║ ██║╚██╔╝██║ ██╔══██║   ██║    ██║      ██╔══██║
-    ██████╔╝ ██║ ██████╔╝ ██║ ╚═╝ ██║ ██║  ██║   ██║    ███████╗ ██║  ██║
-    ╚═════╝  ╚═╝ ╚═════╝  ╚═╝     ╚═╝ ╚═╝  ╚═╝   ╚═╝    ╚══════╝ ╚═╝  ╚═╝
-```
+<!-- Graphical Abstract -->
+<div align="center">
+  <img src="data/GA.png" alt="BioMatch Graphical Abstract" width="100%" />
+</div>
+
+<div align="center">
+  <img src="data/biomatch_banner.svg" alt="BIOMATCH colorful banner" width="100%" />
+</div>
 
 Tip: run `biomatch --color always` in a terminal to see a colorized banner.
 
 ## Installation (Conda only)
 
-Create and populate the environment with the required channels and packages:
+Create and populate the environment with the required channels and packages (installation is intentionally restricted to Conda):
 
 ```bash
-conda create -y -n biomatch_env python=3.11 r-base=4.3.2 -c conda-forge
-conda install -y -n biomatch_env -c conda-forge -c bioconda -c VonPoo biomatch
-conda activate biomatch_env
+conda create -y -n biomatch_44_val python=3.11 r-base=4.3.2 -c conda-forge
+conda install -y -n biomatch_44_val -c conda-forge -c bioconda -c VonPoo biomatch
+conda activate biomatch_44_val
 ```
 
 ## Features
@@ -33,6 +38,12 @@ conda activate biomatch_env
 - Evaluate samples from VCF or PLINK (includes DeepKin summaries)
 - Special sequencing support via `--keep-base` filtering (e.g., WGBS)
 - Built‑in directory layout and `--list-panels` helper
+
+## Highlights
+- Colorized CLI with a startup ASCII banner; toggle via `--color`.
+- Built‑in autosome mappings for common species; override with `--chr`.
+- Panels can be listed with `--list-panels` and are discoverable under Conda `share/biomatch/kmer_ref_panels` if provided.
+- Designed to interoperate with PLINK1/PLINK2 and bcftools for robust pipelines.
 
 ## Quick Start
 
@@ -90,6 +101,7 @@ biomatch --count-db /path/to/count_results --eval-result /path/to/eval_results
 Notes:
 - `--keep-base` retains variants whose alleles are strictly composed of allowed bases; e.g., `ATC` or `A,T,C`.
 - `--list-panels` lists available panel names in the installed directories.
+- For large panel directories, keep them outside your repo and mount/share under the Conda prefix (`$CONDA_PREFIX/share/biomatch/kmer_ref_panels`).
 
 ## Example Dataset
 
@@ -107,9 +119,22 @@ Outputs include `params.RData`, `results.deepkin`, `deepkin_summary.txt`, and `f
 
 The package embeds a minimal Human example panel. Larger species panels are best distributed via a GitHub Release or Git LFS.
 
+## Related Resources
+- iDIGs2 (pig breed identification & panel design): `https://alphaindex.zju.edu.cn/iDIGs2/`
+- UPGG (Unified Pig Gastrointestinal Genome Database): `https://alphaindex.zju.edu.cn/upgg/#/`
+
+## FAQ
+- How do I show today/total visitors or downloads in badges?
+  - Provide a small JSON endpoint (Shields `endpoint` style) from your site and reference it in README; or use `hits.seeyoufarm.com` for quick visitor counts.
+- Can I install without Conda?
+  - Not supported. BioMatch is distributed and tested via Conda only to ensure R/PLINK dependencies.
+- Where are analysis scripts?
+  - Installed under `biomatch/analysis_scripts/` and copied on first run for reproducibility.
+
 ## Troubleshooting
 - R packages not found: ensure the environment includes DeepKin and tidyverse family compatible with `r-base=4.3.2`.
 - Panel not found: verify `--panel-name` matches the file basename (suffix `.fa` is not required).
+ - PLINK path issues: BioMatch will prefer PLINK2 when available; otherwise it falls back to PLINK1. Ensure binaries are on `PATH`.
 
 ## License
 MIT
