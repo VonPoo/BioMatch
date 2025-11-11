@@ -20,7 +20,6 @@ BioMatch is a dataâ€‘driven workflow for sample identity matching. It covers kâ€
   <img src="data/biomatch_banner.svg" alt="BIOMATCH colorful banner" width="100%" />
 </div>
 
-Tip: run `biomatch --color always` in a terminal to see a colorized banner.
 
 ## Installation (Conda only)
 
