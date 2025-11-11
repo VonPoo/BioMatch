@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00d4ff"/>
+      <stop offset="25%" stop-color="#6ee7ff"/>
+      <stop offset="50%" stop-color="#ff7ac6"/>
+      <stop offset="75%" stop-color="#ffd166"/>
+      <stop offset="100%" stop-color="#7bd88f"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0a0f14" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <rect x="12" y="12" width="1176" height="296" rx="16" ry="16" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <line x1="40" y1="70" x2="1160" y2="70" stroke="#30363d" stroke-width="2" stroke-dasharray="10 8"/>
+  <text x="600" y="54" text-anchor="middle" font-family="'Courier New', Monaco, monospace" font-size="16" fill="#8b949e">
+    BioMatch — A data-driven framework for comprehensive sample identification
+  </text>
+  <text x="600" y="195" text-anchor="middle" font-family="'Courier New', Monaco, monospace" font-size="140" font-weight="800" letter-spacing="8" fill="url(#grad)" filter="url(#shadow)">
+    BIOMATCH
+  </text>
+  <line x1="40" y1="230" x2="1160" y2="230" stroke="#30363d" stroke-width="2" stroke-dasharray="10 8"/>
+</svg>
