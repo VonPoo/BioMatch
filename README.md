@@ -1,4 +1,4 @@
-# BioMatch 0.4.4
+# BioMatch
 
 BioMatch is a data‑driven workflow for sample identity matching. It covers k‑mer panel generation, k‑mer counting for FASTA/FASTQ, and evaluation on VCF/PLINK with integrated statistical summaries.
 
