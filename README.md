@@ -27,7 +27,7 @@ Create and populate the environment with the required channels and packages (ins
 
 ```bash
 conda create -y -n biomatch_env python=3.11 r-base=4.3.2 -c conda-forge
-conda install -y -n biomatch_env -c conda-forge -c bioconda -c VonPoo biomatch
+conda install -y -n biomatch_env -c conda-forge -c bioconda biomatch
 conda activate biomatch_env
 ```
 
