@@ -26,9 +26,9 @@ BioMatch is a dataâ€‘driven workflow for sample identity matching. It covers kâ€
 Create and populate the environment with the required channels and packages (installation is intentionally restricted to Conda):
 
 ```bash
-conda create -y -n biomatch_44_val python=3.11 r-base=4.3.2 -c conda-forge
-conda install -y -n biomatch_44_val -c conda-forge -c bioconda -c VonPoo biomatch
-conda activate biomatch_44_val
+conda create -y -n biomatch_env python=3.11 r-base=4.3.2 -c conda-forge
+conda install -y -n biomatch_env -c conda-forge -c bioconda -c VonPoo biomatch
+conda activate biomatch_env
 ```
 
 ## Features
