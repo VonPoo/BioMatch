@@ -5,7 +5,7 @@ BioMatch is a dataâ€‘driven workflow for sample identity matching. It covers kâ€
 <!-- Badges: conda downloads/version, environment -->
 [![Conda Version](https://img.shields.io/conda/vn/VonPoo/biomatch?label=biomatch%20conda)](https://anaconda.org/vonpoo/biomatch)
 [![Conda Version](https://img.shields.io/conda/vn/VonPoo/r-deepkin?label=r-deepkin%20conda)](https://anaconda.org/VonPoo/r-deepkin)
-[![Conda Downloads (total)](https://img.shields.io/conda/dn/bioconda/biomatch?label=biomatch%20downloads)](https://anaconda.org/vonpoo/biomatch)
+[![Conda Downloads (total)](https://img.shields.io/conda/dn/VonPoo/biomatch?label=biomatch%20downloads)](https://anaconda.org/vonpoo/biomatch)
 [![Conda Downloads (total)](https://img.shields.io/conda/dn/VonPoo/biomatch?label=r-deepkin%20downloads)](https://anaconda.org/vonpoo/r-deepkin)
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![R](https://img.shields.io/badge/R-4.3.2-blueviolet)
