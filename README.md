@@ -1,70 +1,115 @@
-# BioMatch
+# BioMatch 1.0.0
 
-BioMatch is a data-driven framework for comprehensive sample identification.
+BioMatch is a data‑driven workflow for sample identity matching. It covers k‑mer panel generation, k‑mer counting for FASTA/FASTQ, and evaluation on VCF/PLINK with integrated statistical summaries.
+
+```
+=============================================================================
+ BioMatch — A data-driven framework for comprehensive sample identification
+=============================================================================
+
+    ██████╗  ██╗  █████╗  ███╗   ███╗  █████╗ ████████╗ ███████╗ ██╗  ██╗
+    ██╔══██╗ ██║ ██╔══██╗ ████╗ ████║ ██╔══██╗╚═ ██╔══╝ ██╔════╝ ██║  ██║
+    ██████╔╝ ██║ ██║  ██║ ██╔████╔██║ ███████║   ██║    ██║      ███████║
+    ██╔══██╗ ██║ ██║  ██║ ██║╚██╔╝██║ ██╔══██║   ██║    ██║      ██╔══██║
+    ██████╔╝ ██║  █████╔╝ ██║ ╚═╝ ██║ ██║  ██║   ██║    ███████╗ ██║  ██║
+    ╚═════╝  ╚═╝  ╚════╝  ╚═╝     ╚═╝ ╚═╝  ╚═╝   ╚═╝    ╚══════╝ ╚═╝  ╚═╝
+```
+
+Tip: run `biomatch --color always` in a terminal to see a colorized banner.
+
+## Installation (Conda only)
+
+Create and populate the environment with the required channels and packages:
+
+```bash
+conda create -y -n biomatch_env python=3.11 r-base -c conda-forge
+conda install -y -n biomatch_env -c conda-forge -c bioconda -c VonPoo biomatch
+conda activate biomatch_env
+```
 
 ## Features
+- Generate k‑mer panels from a reference genome and a population VCF
+- Count k‑mers from FASTA/FASTQ inputs (SE or PE)
+- Evaluate samples from VCF or PLINK (includes DeepKin summaries)
+- Special sequencing support via `--keep-base` filtering (e.g., WGBS)
+- Built‑in directory layout and `--list-panels` helper
 
-- Generate k-mer panels from reference genomes and population VCFs
-- Count k-mers in sample FASTA files
-- Evaluate sample identity
-- Support for FASTQ, VCF and PLINK format files
+## Quick Start
 
-## Installation
+The CLI supports the following modes (1.0.0):
 
+1) Generate panel only
 ```bash
-# Install from conda (推荐，包含所有R包依赖)
-conda install -c bioconda biomatch
-
-# 或从本地包安装 (注意：需要手动安装R依赖)
-cd /path/to/biomatch
-pip install .
+biomatch --gen-panel \
+  --ref /path/to/reference.fa \
+  --pop-vcf /path/to/population.vcf.gz \
+  --chr-set 22 \
+  --panel-name Human_ref_hg38
 ```
 
-### 依赖说明
-
-BioMatch依赖以下软件和包：
-
-- Python依赖: pyfaidx, pandas, numpy, biopython
-- R依赖: tidyverse, caret, e1071, pls, deepKin
-- 其他工具: bcftools, tabix, samtools, plink, plink2, parallel
-
-## Usage
-
-BioMatch supports several processing modes:
-
-### 1. Generate Panel Only
-
+2) Generate panel, count, and evaluate
 ```bash
-biomatch --gen-panel --ref reference.fa --pop-vcf population.vcf --chr-set 33 --panel-name panel_name.fa
+biomatch --gen-panel \
+  --ref /path/to/reference.fa \
+  --pop-vcf /path/to/population.vcf.gz \
+  --chr-set 22 \
+  --panel-name Human_ref_hg38 \
+  --count /path/to/samples_dir \
+  --count-db /path/to/count_results \
+  --eval-result /path/to/eval_results
 ```
 
-### 2. Generate Panel, Count & Eval
-
+3) Counting & evaluation with an existing panel (parallel)
 ```bash
-biomatch --gen-panel --ref reference.fa --pop-vcf population.vcf --chr-set 33 --panel-name panel_name.fa --count samples_dir --count-db count_results --eval-result eval_results
+biomatch --panel-name Human_ref_hg38 \
+  --count /path/to/samples_dir \
+  --count-db /path/to/count_results \
+  -t 20 \
+  --eval-result /path/to/eval_results
 ```
 
-### 3. Count & Eval using Existing Panel (并行处理)
-
+4) BioMatch evaluation on VCF/PLINK (recommended `--keep-base`)
 ```bash
-# 使用-t参数指定并行处理的线程数
-biomatch --panel-name panel_name.fa --count samples_dir --count-db count_results -t 20 --eval-result eval_results
+# Automatically detects .vcf/.vcf.gz or PLINK (.bed/.bim/.fam or .pgen/.psam/.pvar) in the directory
+biomatch --match /path/to/vcf_or_plink_dir \
+  --species human \
+  --keep-base ATC \
+  --eval-result /path/to/eval_results
+
+# If species mapping is not available, specify chromosome count directly
+biomatch --match /path/to/vcf_or_plink_dir \
+  --chr 22 \
+  --eval-result /path/to/eval_results
 ```
 
-> **注意**: `-t` 参数控制并行处理的线程数，建议根据系统资源设置合理的值
-
-### 4. Deepkin Eval on VCF/PLINK
-
+5) Default evaluation on counting results
 ```bash
-biomatch --match samples.vcf --species human --eval-result eval_results
+biomatch --count-db /path/to/count_results --eval-result /path/to/eval_results
 ```
 
-### 5. Default Eval on Count Results
+Notes:
+- `--keep-base` retains variants whose alleles are strictly composed of allowed bases; e.g., `ATC` or `A,T,C`.
+- `--list-panels` lists available panel names in the installed directories.
+
+## Example Dataset
+
+This repository includes a minimal PLINK example at `test_eval/` containing `genomic.*` and `non_genomic.*` triplets. Run:
 
 ```bash
-biomatch --count-db count_results --eval-result eval_results
+biomatch --match test_eval \
+  --species human \
+  --eval-result eval_result_test/output
 ```
+
+Outputs include `params.RData`, `results.deepkin`, `deepkin_summary.txt`, and `final_results.related.csv`.
+
+## Panels and Layout
+
+The package embeds a minimal Human example panel. Larger species panels are best distributed via a GitHub Release or Git LFS.
+
+## Troubleshooting
+- R packages not found: ensure the environment includes DeepKin and tidyverse family compatible with `r-base`.
+- Panel not found: verify `--panel-name` matches the file basename (suffix `.fa` is not required).
 
 ## License
-
 MIT
