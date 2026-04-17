@@ -15,7 +15,7 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-# Package version —— 保持与 meta.yaml 和 setup.py 一致
+# Package version
 __version__ = "1.0.0"
 
 # Get the package directory
@@ -68,7 +68,7 @@ KMER_REF_PANELS_DIR = get_panels_root()
 
 
 # ---------------------------------------------------------------------------
-# Runtime pipeline staging (replaces the old post-link.sh logic)
+# Runtime pipeline staging
 # ---------------------------------------------------------------------------
 
 def build_ntsm_stage(stage_dir: str) -> str:
@@ -440,7 +440,6 @@ def run_default_eval(args):
 # ---------------------------------------------------------------------------
 
 def main():
-    # 启动 banner
     print_banner()
 
     set_color_mode_from_argv()
