@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 # Package version
-__version__ = "1.0.0"
+__version__ = "0.5.0"
 
 # Get the package directory
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
