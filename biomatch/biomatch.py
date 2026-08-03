@@ -210,7 +210,21 @@ SPECIES_AUTOSOMES = {
     "turkey": 39,
     "water_buffalo": 24,
     "zebra_finch": 39,
-    # add more as needed
+    # Plants & others
+    "apple": 17,
+    "barley": 7,
+    "common_wheat": 21,
+    "cotton": 26,
+    "maize": 10,
+    "rapeseed": 19,
+    "rice": 12,
+    "silkworm": 28,
+    "sorghum": 10,
+    "soybean": 20,
+    "tea": 15,
+    "thale_cress": 5,
+    "tobacco": 24,
+    "tomato": 12,
 }
 
 def print_banner():
