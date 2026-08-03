@@ -9,36 +9,164 @@ import sys
 import argparse
 import subprocess
 import shutil
-import glob
+import tempfile
 from pathlib import Path
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 # Package version
-__version__ = "0.4.4"
+__version__ = "1.0.0"
 
 # Get the package directory
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 ANALYSIS_SCRIPTS_DIR = os.path.join(PACKAGE_DIR, "analysis_scripts")
 
-# Prefer panels installed under conda share if available; fallback to package data
-def get_panels_root():
-    conda_prefix = os.environ.get("CONDA_PREFIX")
-    if conda_prefix:
-        share_panels = os.path.join(conda_prefix, "share", "biomatch", "kmer_ref_panels")
-        if os.path.isdir(share_panels):
-            return share_panels
+
+# ---------------------------------------------------------------------------
+# Resource discovery (conda-aware)
+# ---------------------------------------------------------------------------
+
+def _get_install_prefix() -> str:
+    """Return the active install prefix ($CONDA_PREFIX, then sys.prefix)."""
+    return os.environ.get("CONDA_PREFIX") or sys.prefix
+
+
+def get_panels_root() -> str:
+    """Prefer panels installed under $PREFIX/share/biomatch; fallback to package data."""
+    prefix = _get_install_prefix()
+    share_panels = os.path.join(prefix, "share", "biomatch", "kmer_ref_panels")
+    if os.path.isdir(share_panels):
+        return share_panels
     return os.path.join(PACKAGE_DIR, "kmer_ref_panels")
+
+
+def get_resources_dir() -> str:
+    """Locate biomatch resources (makefile + override .py scripts)."""
+    prefix = _get_install_prefix()
+    res = os.path.join(prefix, "share", "biomatch", "resources")
+    if os.path.isdir(res):
+        return res
+    # Dev fallback: scripts shipped alongside the package source tree
+    dev = os.path.join(PACKAGE_DIR, "..", "resources")
+    return os.path.abspath(dev)
+
+
+def get_ntsm_scripts_dir() -> str:
+    """Locate ntsm's scripts directory (installed by the `ntsm` conda package)."""
+    prefix = _get_install_prefix()
+    ns = os.path.join(prefix, "bin", "ntsm-scripts")
+    if not os.path.isdir(ns):
+        raise FileNotFoundError(
+            f"ntsm-scripts not found at {ns}. "
+            "Please ensure ntsm is installed: conda install -c bioconda ntsm"
+        )
+    return ns
+
 
 KMER_REF_PANELS_DIR = get_panels_root()
 
+
+# ---------------------------------------------------------------------------
+# Runtime pipeline staging
+# ---------------------------------------------------------------------------
+
+def build_ntsm_stage(stage_dir: str) -> str:
+    """
+    Assemble a staging directory that contains:
+      - All scripts from the ntsm package (symlinked or copied);
+      - BioMatch's override scripts on top of them.
+
+    Returns the absolute path of the staging directory.
+
+    This replaces the previous post-link.sh that wrote into ntsm-scripts/.
+    Nothing in the ntsm package is modified — everything happens under
+    stage_dir, which is fully owned by biomatch at runtime.
+    """
+    stage = Path(stage_dir).resolve()
+    stage.mkdir(parents=True, exist_ok=True)
+
+    ntsm_dir = Path(get_ntsm_scripts_dir())
+    res_dir = Path(get_resources_dir())
+
+    # 1) Baseline: bring all ntsm scripts into the stage
+    for src in ntsm_dir.iterdir():
+        if not src.is_file():
+            continue
+        dst = stage / src.name
+        if dst.exists() or dst.is_symlink():
+            dst.unlink()
+        try:
+            os.symlink(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+
+    # 2) Override with biomatch's optimized versions
+    override_names = ("00_extractSNPsfromVCF.py", "filterRepetiveSNP.py")
+    for name in override_names:
+        src = res_dir / name
+        if not src.is_file():
+            continue
+        dst = stage / name
+        if dst.exists() or dst.is_symlink():
+            dst.unlink()
+        shutil.copy2(src, dst)
+        try:
+            os.chmod(dst, 0o755)
+        except OSError:
+            pass
+
+    # 3) Place biomatch makefile alongside scripts as well, for convenience
+    mk = res_dir / "makefile.biomatch"
+    if mk.is_file():
+        shutil.copy2(mk, stage / "makefile")
+
+    return str(stage)
+
+
+def run_ntsm_make(target: str, work_dir: str, make_vars: dict | None = None) -> None:
+    """
+    Run `make` with biomatch's makefile against a freshly staged script dir.
+
+    Args:
+        target:    make target (e.g. "generate-sites", "generate-pca-rot-mat")
+        work_dir:  directory where intermediate files are produced
+        make_vars: dict of make variables (e.g. {"name": "...", "ref": "..."})
+    """
+    work = Path(work_dir).resolve()
+    work.mkdir(parents=True, exist_ok=True)
+
+    stage = build_ntsm_stage(str(work / ".biomatch_stage"))
+    makefile = os.path.join(get_resources_dir(), "makefile.biomatch")
+
+    if not os.path.isfile(makefile):
+        raise FileNotFoundError(
+            f"biomatch makefile not found at {makefile}. "
+            "Please reinstall biomatch."
+        )
+
+    cmd = [
+        "make", "-f", makefile,
+        "-C", str(work),
+        f"SCRIPT_DIR={stage}",
+    ]
+    for k, v in (make_vars or {}).items():
+        cmd.append(f"{k}={v}")
+    cmd.append(target)
+
+    env = os.environ.copy()
+    env["BIOMATCH_SCRIPT_DIR"] = stage
+    subprocess.run(cmd, env=env, check=True)
+
+
+# ---------------------------------------------------------------------------
 # ANSI color support
+# ---------------------------------------------------------------------------
+
 COLOR_MODE = os.environ.get("BIOMATCH_COLOR", "auto").lower()
 
 def set_color_mode_from_argv():
     global COLOR_MODE
-    # Pre-scan argv to respect --color before parser renders help
     for i, tok in enumerate(sys.argv):
         if tok == "--color" and i + 1 < len(sys.argv):
             COLOR_MODE = sys.argv[i + 1].lower()
@@ -67,14 +195,10 @@ COLOR = {
     "bold": "\033[1m",
     "dim": "\033[2m",
     "reset": "\033[0m",
-}
-
-# Add truecolor hex mappings used by banner to avoid KeyError
-COLOR.update({
     "#8bd3dd": "\033[38;2;139;211;221m",
     "#f3d2c1": "\033[38;2;243;210;193m",
     "#f582ae": "\033[38;2;245;130;174m",
-})
+}
 
 class ColorHelpFormatter(argparse.RawDescriptionHelpFormatter):
     def start_section(self, heading):
@@ -87,76 +211,37 @@ class ColorHelpFormatter(argparse.RawDescriptionHelpFormatter):
     def _format_action_invocation(self, action):
         if supports_color():
             if not action.option_strings:
-                # Positional arguments
                 metavar = self._format_args(action, action.dest.upper())
                 return f"{COLOR['blue']}{metavar}{COLOR['reset']}"
             else:
-                # Optional arguments
-                parts = []
-                for option_string in action.option_strings:
-                    parts.append(f"{COLOR['green']}{option_string}{COLOR['reset']}")
+                parts = [f"{COLOR['green']}{o}{COLOR['reset']}" for o in action.option_strings]
                 return ', '.join(parts)
-        else:
-            return super()._format_action_invocation(action)
+        return super()._format_action_invocation(action)
 
     def _format_action(self, action):
-        # Get the basic formatted action
         result = super()._format_action(action)
-        
         if supports_color():
-            # Color metavars (like COUNT, PANEL_NAME, etc.)
             import re
             result = re.sub(r'\b([A-Z_]+)\b', f'{COLOR["blue"]}\\1{COLOR["reset"]}', result)
-            
-            # Color default values
             result = re.sub(r'(default: )([^)]+)', f'\\1{COLOR["dim"]}\\2{COLOR["reset"]}', result)
-            
-            # Color file paths and extensions
             result = re.sub(r'(\.[a-z]+)', f'{COLOR["magenta"]}\\1{COLOR["reset"]}', result)
-        
         return result
 
     def format_usage(self):
         usage = super().format_usage()
         if supports_color():
-            # Color the usage line
             usage = usage.replace("usage:", f"{COLOR['cyan']}usage:{COLOR['reset']}")
             usage = usage.replace("biomatch", f"{COLOR['bold']}biomatch{COLOR['reset']}")
-            
-            # Color optional and required parts
             import re
             usage = re.sub(r'\[([^\]]+)\]', f'[{COLOR["dim"]}\\1{COLOR["reset"]}]', usage)
             usage = re.sub(r'\{([^}]+)\}', f'{{{COLOR["yellow"]}\\1{COLOR["reset"]}}}', usage)
         return usage
 
-# Startup banner with color support
-def get_colored_banner():
-    """Generate colored banner based on color mode"""
-    if not supports_color():
-        return BANNER_TEMPLATE.format(version=__version__)
-    
-    # Colored version of the banner
-    colored_banner = f"""
-{COLOR['cyan']}=============================================================================
- BioMatch — A data-driven framework for comprehensive sample identification
-============================================================================={COLOR['reset']}
 
-{COLOR.get('#8bd3dd', COLOR['cyan'])}
-    ██████╗  ██╗ ██████╗  ███╗   ███╗  █████╗ ████████╗ ███████╗ ██╗  ██╗
-    ██╔══██╗ ██║ ██╔══██╗ ████╗ ████║ ██╔══██╗╚═ ██╔══╝ ██╔════╝ ██║  ██║
-    ██████╔╝ ██║ ██║  ██║ ██╔████╔██║ ███████║   ██║    ██║      ███████║
-    ██╔══██╗ ██║ ██║  ██║ ██║╚██╔╝██║ ██╔══██║   ██║    ██║      ██╔══██║
-    ██████╔╝ ██║ ██████╔╝ ██║ ╚═╝ ██║ ██║  ██║   ██║    ███████╗ ██║  ██║
-    ╚═════╝  ╚═╝ ╚═════╝  ╚═╝     ╚═╝ ╚═╝  ╚═╝   ╚═╝    ╚══════╝ ╚═╝  ╚═╝
-    {COLOR['reset']}
+# ---------------------------------------------------------------------------
+# Banner
+# ---------------------------------------------------------------------------
 
-{COLOR.get('#f3d2c1', COLOR['yellow'])} BioMatch {COLOR['bold']}{__version__}{COLOR['reset']}
-{COLOR.get('#f582ae', COLOR['magenta'])} Project: BioMatch | Written by VonPoo <fengbobo927@163.com>
- Copyright (C) 2025 Zhejiang University{COLOR['reset']}
-"""
-    return colored_banner
-
-# Plain banner template for non-color mode
 BANNER_TEMPLATE = r"""
 =============================================================================
  BioMatch — A data-driven framework for comprehensive sample identification
@@ -170,90 +255,89 @@ BANNER_TEMPLATE = r"""
     ╚═════╝  ╚═╝ ╚═════╝  ╚═╝     ╚═╝ ╚═╝  ╚═╝   ╚═╝    ╚══════╝ ╚═╝  ╚═╝
 
  BioMatch {version}
- Project: Biomatch | Written by VonPoo <fengbobo927@163.com>
+ Project: BioMatch | Written by VonPoo <fengbobo927@163.com>
  Copyright (C) 2025 Zhejiang University
 """
 
-# Dynamic banner property
-BANNER = get_colored_banner()
+def get_colored_banner():
+    if not supports_color():
+        return BANNER_TEMPLATE.format(version=__version__)
+    return f"""
+{COLOR['cyan']}=============================================================================
+ BioMatch — A data-driven framework for comprehensive sample identification
+============================================================================={COLOR['reset']}
 
-# Species to autosome count mapping (extendable)
-SPECIES_AUTOSOMES = {
-    "arabian_camel": 36,
-    "cat": 18,
-    "cattle": 29,
-    "chicken": 38,
-    "chimpanzee": 23,
-    "chukar_partridge": 38,
-    "cobitidae": 23,
-    "darwin_finches": 39,
-    "dog": 38,
-    "domestic_yak": 29,
-    "donkey": 30,
-    "dugong": 28,
-    "fox": 16,
-    "giant_panda": 20,
-    "goat": 29,
-    "grivet": 29,
-    "honey_bee": 15,
-    "horse": 31,
-    "human": 22,
-    "lion": 18,
-    "macaque": 20,
-    "mallard": 39,
-    "mouse": 19,
-    "norway_rat": 20,
-    "pig": 18,
-    "rabbit": 21,
-    "sheep": 26,
-    "swan_goose": 39,
-    "turkey": 39,
-    "water_buffalo": 24,
-    "zebra_finch": 39,
-    # add more as needed
-}
+{COLOR['#8bd3dd']}
+    ██████╗  ██╗ ██████╗  ███╗   ███╗  █████╗ ████████╗ ███████╗ ██╗  ██╗
+    ██╔══██╗ ██║ ██╔══██╗ ████╗ ████║ ██╔══██╗╚═ ██╔══╝ ██╔════╝ ██║  ██║
+    ██████╔╝ ██║ ██║  ██║ ██╔████╔██║ ███████║   ██║    ██║      ███████║
+    ██╔══██╗ ██║ ██║  ██║ ██║╚██╔╝██║ ██╔══██║   ██║    ██║      ██╔══██║
+    ██████╔╝ ██║ ██████╔╝ ██║ ╚═╝ ██║ ██║  ██║   ██║    ███████╗ ██║  ██║
+    ╚═════╝  ╚═╝ ╚═════╝  ╚═╝     ╚═╝ ╚═╝  ╚═╝   ╚═╝    ╚══════╝ ╚═╝  ╚═╝
+    {COLOR['reset']}
+
+{COLOR['#f3d2c1']} BioMatch {COLOR['bold']}{__version__}{COLOR['reset']}
+{COLOR['#f582ae']} Project: BioMatch | Written by VonPoo <fengbobo927@163.com>
+ Copyright (C) 2025 Zhejiang University{COLOR['reset']}
+"""
 
 def print_banner():
-    """Print the banner with color support"""
     print(get_colored_banner())
+
+
+# ---------------------------------------------------------------------------
+# Species map
+# ---------------------------------------------------------------------------
+
+SPECIES_AUTOSOMES = {
+    "arabian_camel": 36, "cat": 18, "cattle": 29, "chicken": 38,
+    "chimpanzee": 23, "chukar_partridge": 38, "cobitidae": 23,
+    "darwin_finches": 39, "dog": 38, "domestic_yak": 29, "donkey": 30,
+    "dugong": 28, "fox": 16, "giant_panda": 20, "goat": 29, "grivet": 29,
+    "honey_bee": 15, "horse": 31, "human": 22, "lion": 18, "macaque": 20,
+    "mallard": 39, "mouse": 19, "norway_rat": 20, "pig": 18, "rabbit": 21,
+    "sheep": 26, "swan_goose": 39, "turkey": 39, "water_buffalo": 24,
+    "zebra_finch": 39,
+}
+
+
+# ---------------------------------------------------------------------------
+# Panel helpers
+# ---------------------------------------------------------------------------
 
 def _normalize(s: str) -> str:
     return s.strip().lower()
 
-def find_panel_by_name(panel_name: str) -> str:
-    """Case-insensitive search for a panel across species dirs.
-    Accepts base name without .fa. Returns absolute path to panel .fa or None.
-    """
+def find_panel_by_name(panel_name: str) -> str | None:
     target = _normalize(panel_name.replace(".fa", ""))
-    # Search all species subdirs
+    if not os.path.isdir(KMER_REF_PANELS_DIR):
+        return None
     for species_dir in sorted(os.listdir(KMER_REF_PANELS_DIR)):
         sp_path = os.path.join(KMER_REF_PANELS_DIR, species_dir)
         if not os.path.isdir(sp_path):
             continue
         for fn in os.listdir(sp_path):
-            if fn.endswith(".fa"):
-                base = fn[:-3]
-                if _normalize(base) == target:
-                    return os.path.join(sp_path, fn)
+            if fn.endswith(".fa") and _normalize(fn[:-3]) == target:
+                return os.path.join(sp_path, fn)
     return None
 
 def ensure_species_dir(species_name: str) -> str:
-    """Ensure species directory exists under panels root and return its path."""
-    # Use original casing if exists; else create with Title case first letter
-    existing = [d for d in os.listdir(KMER_REF_PANELS_DIR) if os.path.isdir(os.path.join(KMER_REF_PANELS_DIR, d))]
-    match = None
-    for d in existing:
-        if _normalize(d) == _normalize(species_name):
-            match = d
-            break
+    os.makedirs(KMER_REF_PANELS_DIR, exist_ok=True)
+    existing = [d for d in os.listdir(KMER_REF_PANELS_DIR)
+                if os.path.isdir(os.path.join(KMER_REF_PANELS_DIR, d))]
+    match = next((d for d in existing if _normalize(d) == _normalize(species_name)), None)
     if match is None:
         match = species_name.strip()
     sp_dir = os.path.join(KMER_REF_PANELS_DIR, match)
     os.makedirs(sp_dir, exist_ok=True)
     return sp_dir
 
+
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
+
 def setup_parser():
-    """Set up command line argument parser"""
     desc = "BioMatch: A data-driven framework for comprehensive sample identification"
     if supports_color():
         desc = f"{COLOR['cyan']}{desc}{COLOR['reset']}"
@@ -279,145 +363,104 @@ Processing Modes:
 5. BioMatch Eval with Base-Set Keep (recommended):
    biomatch --match **.vcf/** --species * [or --chr N] --keep-base <bases> --eval-result eval_result_path
 
-Keep-Base (Base-Set) Mode:
---------------------------
-- Purpose: Recommended for special sequencing methods where base changes may occur, like WGBS.
-           Specify an allowed base set and retain variants whose alleles only
-           contain allowed bases, approximating "keep unchanged bases".
-- Examples: --keep-base ATC (keeps A/T/C, excludes any G-containing alleles)
-            --keep-base A,T (comma-separated equivalent)
-
 6. Default Eval on Count Results:
    biomatch --count-db count_result_path --eval-result eval_result_path
         """
     )
-    
-    # Panel generation options
-    panel_title = "Panel Generation Options"
-    if supports_color():
-        panel_title = f"{COLOR['yellow']}{panel_title}{COLOR['reset']}"
-    panel_group = parser.add_argument_group(panel_title)
+
+    panel_group = parser.add_argument_group("Panel Generation Options")
     panel_group.add_argument("--gen-panel", action="store_true", help="Generate a k-mer panel")
     panel_group.add_argument("--ref", help="Reference genome FASTA file")
     panel_group.add_argument("--pop-vcf", help="Population VCF file")
     panel_group.add_argument("--panel-name", help="Name for the panel to generate or use")
     panel_group.add_argument("--chr-set", type=int, help="Autosome count for PLINK2 chr-set (e.g., 22)")
-    panel_group.add_argument("--out", help="Output directory for intermediate results (defaults to species panel dir)")
-    
-    # Counting options
-    count_title = "Counting Options"
-    if supports_color():
-        count_title = f"{COLOR['green']}{count_title}{COLOR['reset']}"
-    count_group = parser.add_argument_group(count_title)
-    count_group.add_argument("--count", help="FASTA/FASTQ file or directory containing files for identification")
+    panel_group.add_argument("--out", help="Output directory for intermediate results")
+
+    count_group = parser.add_argument_group("Counting Options")
+    count_group.add_argument("--count", help="FASTA/FASTQ file or directory")
     count_group.add_argument("--count-db", help="Path to save counting results")
-    count_group.add_argument("-t", "--threads", type=int, default=10, help="Number of parallel jobs for counting")
-    
-    # Evaluation options
-    eval_title = "Evaluation Options"
-    if supports_color():
-        eval_title = f"{COLOR['magenta']}{eval_title}{COLOR['reset']}"
-    eval_group = parser.add_argument_group(eval_title)
-    eval_group.add_argument("--match", help="VCF file or PLINK format file prefix for BioMatch evaluation")
-    eval_group.add_argument("--species", help="Species name for autosome count (e.g., human, cattle)")
-    eval_group.add_argument("--chromosomes", "--chr", dest="chromosomes", type=int, help="Override autosome chromosome count directly (e.g., 22)")
-    # Keep-base: base-set semantics; retain only variants whose alleles are composed of allowed bases
-    # Accepts compact form (e.g., ATC) or comma-separated (e.g., A,T,C). Case-insensitive.
-    eval_group.add_argument(
-        "--keep-base",
-        help=(
-            "Allowed bases set for retention (e.g., ATC or A,T,C). "
-            "Removes any variant where either allele contains bases outside the allowed set."
-        )
-    )
+    count_group.add_argument("-t", "--threads", type=int, default=10, help="Number of parallel jobs")
+
+    eval_group = parser.add_argument_group("Evaluation Options")
+    eval_group.add_argument("--match", help="VCF file or PLINK prefix for BioMatch evaluation")
+    eval_group.add_argument("--species", help="Species name for autosome count")
+    eval_group.add_argument("--chromosomes", "--chr", dest="chromosomes", type=int,
+                            help="Override autosome chromosome count")
+    eval_group.add_argument("--keep-base",
+        help="Allowed bases set for retention (e.g., ATC or A,T,C).")
     eval_group.add_argument("--eval-result", help="Path to save evaluation results")
-    
-    # General options
-    parser.add_argument("--color", choices=["auto", "always", "never"], default=os.environ.get("BIOMATCH_COLOR", "auto"), help="Colorized help output mode")
-    parser.add_argument("--list-panels", action="store_true", help="List built-in panel names available to use")
+
+    parser.add_argument("--color", choices=["auto", "always", "never"],
+                        default=os.environ.get("BIOMATCH_COLOR", "auto"),
+                        help="Colorized help output mode")
+    parser.add_argument("--list-panels", action="store_true",
+                        help="List built-in panel names")
     parser.add_argument("--version", action="version", version=f"BioMatch {__version__}")
-    
+
     return parser
 
-def copy_scripts():
-    """Copy analysis scripts to the package directory"""
-    source_dir = "/disk227/fengbo/biomatch_software"
-    scripts = [
-        "00_extractSNPsfromVCF.py",
-        "filterRepetiveSNP.py",
-        "PLINK_Geno_nonGeno.R",
-        "VCF_Geno_nonGeno.R",
-        "ref_map_new.py"
-    ]
-    
-    for script in scripts:
-        source = os.path.join(source_dir, script)
-        dest = os.path.join(ANALYSIS_SCRIPTS_DIR, script)
-        if not os.path.exists(dest) and os.path.exists(source):
-            shutil.copy2(source, dest)
-            if script.endswith(".py"):
-                os.chmod(dest, 0o755)  # Make Python scripts executable
 
-def run_biomatch_proc(command: str, check: bool = True, env: dict | None = None, cwd: str | None = None):
-    """Run a shell command using bash -lc without process-name masking.
+# ---------------------------------------------------------------------------
+# Lightweight process helper
+# ---------------------------------------------------------------------------
 
-    This avoids altering argv0 (no exec -a biomatch), per user's preference.
-    """
-    cmd = ["bash", "-lc", command]
-    return subprocess.run(cmd, check=check, env=env, cwd=cwd)
+def run_biomatch_proc(command: str, check: bool = True,
+                      env: dict | None = None, cwd: str | None = None):
+    """Run a shell command using bash -lc."""
+    return subprocess.run(["bash", "-lc", command], check=check, env=env, cwd=cwd)
+
+
+# ---------------------------------------------------------------------------
+# Mode delegates
+# ---------------------------------------------------------------------------
 
 def generate_panel(args):
-    """Delegate panel generation to biomatch.panels module."""
     from .panels import generate_panel as _generate_panel
     return _generate_panel(args)
 
 def run_counting(args):
-    """Delegate counting to biomatch.counting module."""
     from .counting import run_counting as _run_counting
     return _run_counting(args)
 
 def run_ntsm_eval(args):
-    """Delegate ntsm evaluation to biomatch.evaluation module."""
     from .evaluation import run_ntsm_eval as _run_ntsm_eval
     return _run_ntsm_eval(args)
 
 def run_deepkin_eval(args):
-    """Delegate BioMatch evaluation to biomatch.evaluation module."""
     from .evaluation import run_deepkin_eval as _run_deepkin_eval
     return _run_deepkin_eval(args)
 
 def run_default_eval(args):
-    """Alias default eval to ntsm evaluation in biomatch.evaluation."""
     from .evaluation import run_ntsm_eval as _run_ntsm_eval
     return _run_ntsm_eval(args)
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
-    """Main function to handle command line arguments and run the appropriate mode"""
-    # Ensure analysis scripts are available
-    copy_scripts()
-    
-    # Print startup banner
     print_banner()
-    
-    # Parse command line arguments
+
     set_color_mode_from_argv()
     parser = setup_parser()
     args = parser.parse_args()
-    # Update color mode from parsed args for subsequent outputs
+
     os.environ["BIOMATCH_COLOR"] = args.color
     globals()["COLOR_MODE"] = args.color
-    # Optional: list all available panels and exit
+
     if getattr(args, "list_panels", False):
         print("Available panel names:")
         try:
             names = []
-            for species_dir in sorted(os.listdir(KMER_REF_PANELS_DIR)):
-                sp_path = os.path.join(KMER_REF_PANELS_DIR, species_dir)
-                if not os.path.isdir(sp_path):
-                    continue
-                for fn in sorted(os.listdir(sp_path)):
-                    if fn.endswith('.fa'):
-                        names.append(os.path.splitext(fn)[0])
+            if os.path.isdir(KMER_REF_PANELS_DIR):
+                for species_dir in sorted(os.listdir(KMER_REF_PANELS_DIR)):
+                    sp_path = os.path.join(KMER_REF_PANELS_DIR, species_dir)
+                    if not os.path.isdir(sp_path):
+                        continue
+                    for fn in sorted(os.listdir(sp_path)):
+                        if fn.endswith('.fa'):
+                            names.append(os.path.splitext(fn)[0])
             if names:
                 for nm in sorted(names):
                     print(f" - {nm}")
@@ -426,53 +469,36 @@ def main():
         except Exception as e:
             print(f"Error listing panels: {e}")
         return 0
-    
-    # Determine which mode to run
+
     if args.gen_panel:
-        # Mode 1 or 2: Generate Panel
-        success = generate_panel(args)
-        if not success:
+        if not generate_panel(args):
             return 1
-        
-        # If count is specified, also run counting and ntsmEval (Mode 2)
         if args.count:
-            success = run_counting(args)
-            if not success:
+            if not run_counting(args):
                 return 1
-            
-            if args.eval_result:
-                success = run_ntsm_eval(args)
-                if not success:
-                    return 1
-    
+            if args.eval_result and not run_ntsm_eval(args):
+                return 1
+
     elif args.match:
-        # Mode 4: BioMatch Eval on VCF/PLINK
-        success = run_deepkin_eval(args)
-        if not success:
+        if not run_deepkin_eval(args):
             return 1
-    
+
     elif args.panel_name and args.count:
-        # Mode 3: Count & Eval using Existing Panel
-        success = run_counting(args)
-        if not success:
+        if not run_counting(args):
             return 1
-        
-        if args.eval_result:
-            success = run_ntsm_eval(args)
-            if not success:
-                return 1
-    
+        if args.eval_result and not run_ntsm_eval(args):
+            return 1
+
     elif args.count_db and args.eval_result:
-        # Mode 5: ntsmEval on Count Results
-        success = run_ntsm_eval(args)
-        if not success:
+        if not run_ntsm_eval(args):
             return 1
-    
+
     else:
         parser.print_help()
         return 1
-    
+
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
